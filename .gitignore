@@ -1,0 +1,9 @@
+# Node modules
+vite-project/node_modules/
+
+# Vite build output
+vite-project/dist/
+
+# Misc
+.DS_Store
+node_modules/

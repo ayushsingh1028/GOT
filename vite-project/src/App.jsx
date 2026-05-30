@@ -11,12 +11,16 @@ function App() {
     const audio = audioRef.current
     if (!audio) return
 
-    // Explicitly set full volume
     audio.volume = 1.0
+    audio.playsInline = true
+    audio.autoplay = true
 
     // Attempt autoplay immediately on load
     const playAudio = () => {
       audio.play()
+        .then(() => {
+          setIsPlaying(true)
+        })
         .catch(() => {
           console.log("Autoplay blocked. Soundtrack queued to start on first interaction.")
         })
@@ -26,21 +30,19 @@ function App() {
 
     // Fallback trigger: play audio on first successful user interaction anywhere on the document
     const handleInteraction = () => {
-      if (isPlaying && audio.paused) {
-        audio.play()
-          .then(() => {
-            console.log("Soundtrack playing successfully.")
-            // Remove listeners from both document and window after successful playback
-            document.removeEventListener('click', handleInteraction)
-            document.removeEventListener('scroll', handleInteraction)
-            document.removeEventListener('keydown', handleInteraction)
-            document.removeEventListener('touchstart', handleInteraction)
-            window.removeEventListener('scroll', handleInteraction)
-          })
-          .catch(err => {
-            console.log("Playback attempt rejected, waiting for next interaction:", err)
-          })
-      }
+      if (!audio.paused) return
+      audio.play()
+        .then(() => {
+          setIsPlaying(true)
+          document.removeEventListener('click', handleInteraction)
+          document.removeEventListener('scroll', handleInteraction)
+          document.removeEventListener('keydown', handleInteraction)
+          document.removeEventListener('touchstart', handleInteraction)
+          window.removeEventListener('scroll', handleInteraction)
+        })
+        .catch(err => {
+          console.log("Playback attempt rejected, waiting for next interaction:", err)
+        })
     }
 
     document.addEventListener('click', handleInteraction)
@@ -77,6 +79,8 @@ function App() {
         src="/video/Videoobuchenie_-_Game_Of_Thrones_theme_Orchestra_cover_(mp3.pm).mp3"
         loop
         preload="auto"
+        autoPlay
+        playsInline
       />
 
       <Hero />

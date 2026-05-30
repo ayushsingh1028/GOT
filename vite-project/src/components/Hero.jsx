@@ -58,30 +58,22 @@ const CHAPTERS = [
 ]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-const lerp = (a, b, t) => a + (b - a) * t
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
-const invlerp = (a, b, v) => clamp((v - a) / (b - a), 0, 1)
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const Hero = () => {
-  const containerRef  = useRef(null)
-  const stickyRef     = useRef(null)
-  const videoRef      = useRef(null)
-  const overlayRef    = useRef(null)
-  const titleRef      = useRef(null)
-  const subtitleRef   = useRef(null)
-  const bodyRef       = useRef(null)
-  const sigilRef      = useRef(null)
-  const progressRef   = useRef(null)
-  const vignetteRef   = useRef(null)
+  const videoRef = useRef(null)
+  const overlayRef = useRef(null)
+  const titleRef = useRef(null)
+  const subtitleRef = useRef(null)
+  const bodyRef = useRef(null)
+  const sigilRef = useRef(null)
+  const vignetteRef = useRef(null)
   const chapterLabelRef = useRef(null)
-  const runeBarRef    = useRef(null)
 
   const [activeChapter, setActiveChapter] = useState(0)
-  const [videoReady, setVideoReady]       = useState(false)
-  const [entered, setEntered]             = useState(false)
-  const scrollControlRef                  = useRef(false)
-  const scrollControlTimeoutRef           = useRef(null)
+  const [videoReady, setVideoReady] = useState(false)
+  const [introComplete, setIntroComplete] = useState(false)
 
   // ─── Chapter transition ───────────────────────────────────────────────────
   const prevChapter = useRef(-1)
@@ -98,18 +90,18 @@ const Hero = () => {
       y: -24, opacity: 0, duration: 0.35, ease: 'power2.in', stagger: 0.04,
     })
     // update DOM mid-fade via callback
-    .call(() => {
-      if (titleRef.current)    titleRef.current.textContent    = ch.title
-      if (subtitleRef.current) subtitleRef.current.textContent = ch.subtitle
-      if (bodyRef.current)     bodyRef.current.textContent     = ch.body
-      if (sigilRef.current)    sigilRef.current.textContent    = ch.sigil
-    })
+      .call(() => {
+        if (titleRef.current) titleRef.current.textContent = ch.title
+        if (subtitleRef.current) subtitleRef.current.textContent = ch.subtitle
+        if (bodyRef.current) bodyRef.current.textContent = ch.body
+        if (sigilRef.current) sigilRef.current.textContent = ch.sigil
+      })
     // fade in new text
-    .fromTo(
-      [sigilRef.current, subtitleRef.current, titleRef.current, bodyRef.current],
-      { y: 32, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.55, ease: 'power3.out', stagger: 0.07 }
-    )
+      .fromTo(
+        [sigilRef.current, subtitleRef.current, titleRef.current, bodyRef.current],
+        { y: 32, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.55, ease: 'power3.out', stagger: 0.07 }
+      )
 
     // chapter label
     if (chapterLabelRef.current) {
@@ -143,10 +135,10 @@ const Hero = () => {
 
     // Initial chapter text
     const ch0 = CHAPTERS[0]
-    if (titleRef.current)    titleRef.current.textContent    = ch0.title
+    if (titleRef.current) titleRef.current.textContent = ch0.title
     if (subtitleRef.current) subtitleRef.current.textContent = ch0.subtitle
-    if (bodyRef.current)     bodyRef.current.textContent     = ch0.body
-    if (sigilRef.current)    sigilRef.current.textContent    = ch0.sigil
+    if (bodyRef.current) bodyRef.current.textContent = ch0.body
+    if (sigilRef.current) sigilRef.current.textContent = ch0.sigil
 
     return () => video.removeEventListener('loadedmetadata', playOnReady)
   }, [])
@@ -154,98 +146,36 @@ const Hero = () => {
   useEffect(() => {
     if (!videoReady) return
 
-    const video    = videoRef.current
+    const video = videoRef.current
     const duration = video.duration || 1
 
-    const activateScrollControl = () => {
-      scrollControlRef.current = true
-      if (scrollControlTimeoutRef.current) {
-        window.clearTimeout(scrollControlTimeoutRef.current)
-      }
-      scrollControlTimeoutRef.current = window.setTimeout(() => {
-        scrollControlRef.current = false
-      }, 1100)
-    }
-
+    // Update chapter based on video time
     const onVideoTimeUpdate = () => {
-      if (scrollControlRef.current) return
       const p = clamp(video.currentTime / duration, 0, 1)
       const idx = CHAPTERS.findIndex(c => p >= c.progress[0] && p < c.progress[1])
       transitionChapter(idx === -1 ? CHAPTERS.length - 1 : idx)
+
+      // Vignette intensity based on video progress
+      const vinInt = 0.55 + Math.sin(p * Math.PI) * 0.2
+      if (vignetteRef.current) {
+        vignetteRef.current.style.opacity = String(vinInt)
+      }
+    }
+
+    // When video ends, mark intro as complete
+    const onVideoEnd = () => {
+      setIntroComplete(true)
     }
 
     video.addEventListener('timeupdate', onVideoTimeUpdate)
+    video.addEventListener('ended', onVideoEnd)
 
-    // Scroll distance = 6× viewport so we have plenty of room to scrub
-    const scrollHeight = window.innerHeight * 6
-
-    // Pin the sticky wrapper
-    const pinTrigger = ScrollTrigger.create({
-      trigger: containerRef.current,
-      start:   'top top',
-      end:     `+=${scrollHeight}`,
-      pin:     stickyRef.current,
-      pinSpacing: true,
-      anticipatePin: 1,
-    })
-
-    // Start the video playback independently from scroll once the file is ready.
+    // Play video immediately
     video.play().catch(() => {
-      console.log('Background video play deferred until user interaction.')
+      console.log('Autoplay blocked; video will play on interaction.')
     })
 
-    // Main scrub timeline — updates text, progress, and visual atmosphere while the video plays independently.
-    const scrubTl = gsap.timeline({
-      scrollTrigger: {
-        trigger: containerRef.current,
-        start:   'top top',
-        end:     `+=${scrollHeight}`,
-        scrub:   1.2,
-        onUpdate: (self) => {
-          activateScrollControl()
-          const scrollTime = clamp(self.progress * duration, 0, duration)
-          if (Math.abs(video.currentTime - scrollTime) > 0.05) {
-            video.currentTime = scrollTime
-          }
-
-          if (progressRef.current) {
-            progressRef.current.style.width = `${self.progress * 100}%`
-          }
-
-          const p = self.progress
-          const idx = CHAPTERS.findIndex(c => p >= c.progress[0] && p < c.progress[1])
-          transitionChapter(idx === -1 ? CHAPTERS.length - 1 : idx)
-
-          const vinInt = 0.55 + Math.sin(p * Math.PI) * 0.2
-          if (vignetteRef.current) {
-            vignetteRef.current.style.opacity = String(vinInt)
-          }
-        },
-      },
-    })
-
-    // Subtle overlay colour shift across scroll
-    gsap.to(overlayRef.current, {
-      background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.0) 55%)',
-      scrollTrigger: {
-        trigger: containerRef.current,
-        start: 'top top',
-        end: `+=${scrollHeight}`,
-        scrub: 2,
-      },
-    })
-
-    if (runeBarRef.current) {
-      const ticks = runeBarRef.current.querySelectorAll('.rune-tick')
-      gsap.fromTo(ticks,
-        { scaleY: 0, opacity: 0 },
-        {
-          scaleY: 1, opacity: 1, stagger: 0.06, duration: 0.6, ease: 'elastic.out(1,0.5)',
-          scrollTrigger: { trigger: containerRef.current, start: 'top 80%' }
-        }
-      )
-    }
-
+    // Entrance animation for text
     gsap.fromTo(
       [sigilRef.current, subtitleRef.current, titleRef.current, bodyRef.current],
       { y: 50, opacity: 0 },
@@ -254,129 +184,94 @@ const Hero = () => {
 
     return () => {
       video.removeEventListener('timeupdate', onVideoTimeUpdate)
-      if (scrollControlTimeoutRef.current) {
-        window.clearTimeout(scrollControlTimeoutRef.current)
-      }
-      scrubTl.kill()
-      pinTrigger.kill()
-      ScrollTrigger.getAll().forEach(t => t.kill())
+      video.removeEventListener('ended', onVideoEnd)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoReady])
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
-
-      {/* ── Loading overlay ── */}
-      <div className={`got-loading ${videoReady ? 'hidden' : ''}`}>
-        <div className="got-loading-logo">Game of Thrones</div>
-        <div className="got-loading-sub">The Chronicles of Westeros</div>
-        <div className="got-loading-bar-wrap">
-          <div className="got-loading-bar-fill" />
+      {/* ── Intro Overlay ── */}
+      <div 
+        className={`got-intro-overlay ${introComplete ? 'hidden' : ''}`}
+        onClick={() => setIntroComplete(true)}
+      >
+        <div className="got-intro-content">
+          <div className="got-intro-title">Game of Thrones</div>
+          <div className="got-intro-subtitle">The Chronicles of Westeros</div>
+          <div className="got-intro-message">
+            <p>Watch the opening story unfold...</p>
+            <p className="got-intro-sub-message">Then explore the realm.</p>
+          </div>
+          <div className="got-intro-loader">
+            <div className="got-intro-dot"></div>
+            <div className="got-intro-dot"></div>
+            <div className="got-intro-dot"></div>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--gold-dim)', marginTop: '48px', letterSpacing: '0.3em' }}>
+            CLICK TO CONTINUE
+          </div>
         </div>
       </div>
 
-      {/* ── Main scroll container ── */}
-      <div
-        ref={containerRef}
-        className="got-container"
-        style={{ height: `${window.innerHeight * 6 + window.innerHeight}px` }}
-      >
-        {/* ── Sticky viewport ── */}
-        <div ref={stickyRef} className="got-sticky">
+      {/* ── Hero Section ── */}
+      <div className="got-hero-section">
+        {/* Video */}
+        <video
+          ref={videoRef}
+          className="got-video"
+          src="/video/one.mp4"
+          playsInline
+          muted
+          autoPlay
+          preload="auto"
+          webkit-playsinline
+          playsinline
+        />
 
-          {/* Video */}
-          <video
-            ref={videoRef}
-            className="got-video"
-            src="/video/one.mp4"
-            playsInline
-            muted
-            autoPlay
-            loop
-            preload="auto"
-            webkit-playsinline
-            playsinline
-          />
+        {/* Layers */}
+        <div ref={vignetteRef} className="got-vignette" />
+        <div ref={overlayRef} className="got-overlay" />
+        <div className="got-grain" />
 
-          {/* Layers */}
-          <div ref={vignetteRef} className="got-vignette" />
-          <div ref={overlayRef}  className="got-overlay" />
-          <div className="got-grain" />
+        {/* Nav */}
+        <nav className="got-nav">
+          <div className="got-nav-logo">Game of Thrones</div>
+          <ul className="got-nav-links">
+            {['The World', 'Characters', 'Houses', 'History'].map(l => (
+              <li key={l}><a href="#0">{l}</a></li>
+            ))}
+          </ul>
+        </nav>
 
-          {/* Corner ornaments */}
-          {['tl','tr','bl','br'].map(pos => (
-            <div key={pos} className={`got-corner got-corner-${pos}`}>
-              <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2 2 L2 20 M2 2 L20 2" stroke="#c9a84c" strokeWidth="1" strokeOpacity="0.5"/>
-                <path d="M2 2 L8 8" stroke="#c9a84c" strokeWidth="0.5" strokeOpacity="0.4"/>
-                <rect x="1" y="1" width="4" height="4" fill="none" stroke="#c9a84c" strokeWidth="0.5" strokeOpacity="0.6"/>
-              </svg>
-            </div>
-          ))}
+        {/* Content */}
+        <div className="got-content">
+          <span ref={sigilRef} className="got-sigil" />
+          <div className="got-divider">
+            <div className="got-divider-line" />
+            <div className="got-divider-diamond" />
+            <div className="got-divider-line right" />
+          </div>
+          <span ref={subtitleRef} className="got-subtitle" />
+          <h1 ref={titleRef} className="got-title" />
+          <p ref={bodyRef} className="got-body" />
+        </div>
 
-          {/* Nav */}
-          <nav className="got-nav">
-            <div className="got-nav-logo">Game of Thrones</div>
-            <ul className="got-nav-links">
-              {['The World','Characters','Houses','History'].map(l => (
-                <li key={l}><a href="#0">{l}</a></li>
-              ))}
-            </ul>
-          </nav>
-
-          {/* Rune bar */}
-          <div ref={runeBarRef} className="got-rune-bar">
-            {Array.from({ length: 80 }).map((_, i) => (
-              <div key={i} className="rune-tick" />
+        {/* Right panel with chapter indicator */}
+        <div className="got-right-panel">
+          <div ref={chapterLabelRef} className="got-chapter-label">01 / 06</div>
+          <div className="got-vert-line" />
+          <div className="got-dots">
+            {CHAPTERS.map((_, i) => (
+              <div
+                key={i}
+                className={`got-dot ${i === activeChapter ? 'active' : ''}`}
+              />
             ))}
           </div>
-
-   
-          <div className="got-content">
-            <span ref={sigilRef} className="got-sigil" />
-            <div className="got-divider">
-              <div className="got-divider-line" />
-              <div className="got-divider-diamond" />
-              <div className="got-divider-line right" />
-            </div>
-            <span ref={subtitleRef} className="got-subtitle" />
-            <h1 ref={titleRef} className="got-title" />
-            <p ref={bodyRef} className="got-body" />
-            <div className="got-cta-row">
-              <button className="got-cta-btn">Begin the Journey</button>
-              <button className="got-cta-ghost">Explore the Realm</button>
-            </div>
-          </div>
-
-         
-          <div className="got-right-panel">
-            <div ref={chapterLabelRef} className="got-chapter-label">01 / 06</div>
-            <div className="got-vert-line" />
-            <div className="got-dots">
-              {CHAPTERS.map((_, i) => (
-                <div
-                  key={i}
-                  className={`got-dot ${i === activeChapter ? 'active' : ''}`}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Scroll hint */}
-          <div className="got-scroll-hint">
-            <span>Scroll</span>
-            <div className="arrow" />
-          </div>
-
-          {/* Progress bar */}
-          <div className="got-progress-bar-wrap">
-            <div ref={progressRef} className="got-progress-bar-fill" />
-          </div>
-
-        </div>{/* /sticky */}
-      </div>{/* /container */}
+        </div>
+      </div>
     </>
   )
 }

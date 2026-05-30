@@ -80,6 +80,8 @@ const Hero = () => {
   const [activeChapter, setActiveChapter] = useState(0)
   const [videoReady, setVideoReady]       = useState(false)
   const [entered, setEntered]             = useState(false)
+  const scrollControlRef                  = useRef(false)
+  const scrollControlTimeoutRef           = useRef(null)
 
   // ─── Chapter transition ───────────────────────────────────────────────────
   const prevChapter = useRef(-1)
@@ -124,9 +126,20 @@ const Hero = () => {
     const video = videoRef.current
     if (!video) return
 
-    const onReady = () => setTimeout(() => setVideoReady(true), 1000)
-        video.addEventListener('loadedmetadata', onReady)
-    if (video.readyState >= 1) onReady()
+    video.muted = true
+    video.playsInline = true
+    video.setAttribute('webkit-playsinline', '')
+    video.setAttribute('playsinline', '')
+
+    const playOnReady = () => {
+      video.play().catch(() => {
+        console.log('Autoplay blocked for background video; it will continue after interaction.')
+      })
+      setTimeout(() => setVideoReady(true), 1000)
+    }
+
+    video.addEventListener('loadedmetadata', playOnReady)
+    if (video.readyState >= 1) playOnReady()
 
     // Initial chapter text
     const ch0 = CHAPTERS[0]
@@ -135,7 +148,7 @@ const Hero = () => {
     if (bodyRef.current)     bodyRef.current.textContent     = ch0.body
     if (sigilRef.current)    sigilRef.current.textContent    = ch0.sigil
 
-    return () => video.removeEventListener('loadedmetadata', onReady)
+    return () => video.removeEventListener('loadedmetadata', playOnReady)
   }, [])
 
   useEffect(() => {
@@ -143,6 +156,25 @@ const Hero = () => {
 
     const video    = videoRef.current
     const duration = video.duration || 1
+
+    const activateScrollControl = () => {
+      scrollControlRef.current = true
+      if (scrollControlTimeoutRef.current) {
+        window.clearTimeout(scrollControlTimeoutRef.current)
+      }
+      scrollControlTimeoutRef.current = window.setTimeout(() => {
+        scrollControlRef.current = false
+      }, 1100)
+    }
+
+    const onVideoTimeUpdate = () => {
+      if (scrollControlRef.current) return
+      const p = clamp(video.currentTime / duration, 0, 1)
+      const idx = CHAPTERS.findIndex(c => p >= c.progress[0] && p < c.progress[1])
+      transitionChapter(idx === -1 ? CHAPTERS.length - 1 : idx)
+    }
+
+    video.addEventListener('timeupdate', onVideoTimeUpdate)
 
     // Scroll distance = 6× viewport so we have plenty of room to scrub
     const scrollHeight = window.innerHeight * 6
@@ -157,23 +189,12 @@ const Hero = () => {
       anticipatePin: 1,
     })
 
-    let targetTime = 0
-    const renderLoop = () => {
-      if (!video) return
-      
-      // CRITICAL PERFORMANCE GUARD: If the video is currently seeking, skip this frame 
-      // to prevent Chrome/Safari decoder choke and buffer thrashing.
-      if (video.seeking) return
+    // Start the video playback independently from scroll once the file is ready.
+    video.play().catch(() => {
+      console.log('Background video play deferred until user interaction.')
+    })
 
-      const current = video.currentTime
-      const diff = targetTime - current
-      // Using a slightly higher threshold and an adaptive lerp factor for extreme responsiveness
-      if (Math.abs(diff) > 0.02) {
-        video.currentTime = current + diff * 0.15
-      }
-    }
-
-    // Main scrub timeline — drives video time + rune bar
+    // Main scrub timeline — updates text, progress, and visual atmosphere while the video plays independently.
     const scrubTl = gsap.timeline({
       scrollTrigger: {
         trigger: containerRef.current,
@@ -181,20 +202,20 @@ const Hero = () => {
         end:     `+=${scrollHeight}`,
         scrub:   1.2,
         onUpdate: (self) => {
-          // Update target time for the lerped ticker loop
-          targetTime = self.progress * duration
+          activateScrollControl()
+          const scrollTime = clamp(self.progress * duration, 0, duration)
+          if (Math.abs(video.currentTime - scrollTime) > 0.05) {
+            video.currentTime = scrollTime
+          }
 
-          // progress bar
           if (progressRef.current) {
             progressRef.current.style.width = `${self.progress * 100}%`
           }
 
-          // chapter detection
           const p = self.progress
           const idx = CHAPTERS.findIndex(c => p >= c.progress[0] && p < c.progress[1])
           transitionChapter(idx === -1 ? CHAPTERS.length - 1 : idx)
 
-          // vignette intensity
           const vinInt = 0.55 + Math.sin(p * Math.PI) * 0.2
           if (vignetteRef.current) {
             vignetteRef.current.style.opacity = String(vinInt)
@@ -202,8 +223,6 @@ const Hero = () => {
         },
       },
     })
-
-    gsap.ticker.add(renderLoop)
 
     // Subtle overlay colour shift across scroll
     gsap.to(overlayRef.current, {
@@ -216,7 +235,6 @@ const Hero = () => {
       },
     })
 
-    // Rune bar decorative tick animation
     if (runeBarRef.current) {
       const ticks = runeBarRef.current.querySelectorAll('.rune-tick')
       gsap.fromTo(ticks,
@@ -228,7 +246,6 @@ const Hero = () => {
       )
     }
 
-    // Entrance animation
     gsap.fromTo(
       [sigilRef.current, subtitleRef.current, titleRef.current, bodyRef.current],
       { y: 50, opacity: 0 },
@@ -236,9 +253,12 @@ const Hero = () => {
     )
 
     return () => {
+      video.removeEventListener('timeupdate', onVideoTimeUpdate)
+      if (scrollControlTimeoutRef.current) {
+        window.clearTimeout(scrollControlTimeoutRef.current)
+      }
       scrubTl.kill()
       pinTrigger.kill()
-      gsap.ticker.remove(renderLoop)
       ScrollTrigger.getAll().forEach(t => t.kill())
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,7 +293,11 @@ const Hero = () => {
             src="/video/one.mp4"
             playsInline
             muted
+            autoPlay
+            loop
             preload="auto"
+            webkit-playsinline
+            playsinline
           />
 
           {/* Layers */}

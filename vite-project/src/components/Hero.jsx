@@ -79,6 +79,7 @@ const Hero = () => {
 
   const [activeChapter, setActiveChapter] = useState(0)
   const [videoReady, setVideoReady]       = useState(false)
+  const [entered, setEntered]             = useState(false)
 
   // ─── Chapter transition ───────────────────────────────────────────────────
   const prevChapter = useRef(-1)
@@ -137,14 +138,13 @@ const Hero = () => {
     return () => video.removeEventListener('loadedmetadata', onReady)
   }, [])
 
-  // ─── GSAP ScrollTrigger ───────────────────────────────────────────────────
   useEffect(() => {
     if (!videoReady) return
 
     const video    = videoRef.current
     const duration = video.duration || 1
 
-    // Scroll distance = 5× viewport so we have plenty of room to scrub
+    // Scroll distance = 6× viewport so we have plenty of room to scrub
     const scrollHeight = window.innerHeight * 6
 
     // Pin the sticky wrapper
@@ -157,6 +157,22 @@ const Hero = () => {
       anticipatePin: 1,
     })
 
+    let targetTime = 0
+    const renderLoop = () => {
+      if (!video) return
+      
+      // CRITICAL PERFORMANCE GUARD: If the video is currently seeking, skip this frame 
+      // to prevent Chrome/Safari decoder choke and buffer thrashing.
+      if (video.seeking) return
+
+      const current = video.currentTime
+      const diff = targetTime - current
+      // Using a slightly higher threshold and an adaptive lerp factor for extreme responsiveness
+      if (Math.abs(diff) > 0.02) {
+        video.currentTime = current + diff * 0.15
+      }
+    }
+
     // Main scrub timeline — drives video time + rune bar
     const scrubTl = gsap.timeline({
       scrollTrigger: {
@@ -165,11 +181,8 @@ const Hero = () => {
         end:     `+=${scrollHeight}`,
         scrub:   1.2,
         onUpdate: (self) => {
-          // video scrub
-          const t = self.progress * duration
-          if (Math.abs(video.currentTime - t) > 0.04) {
-            video.currentTime = t
-          }
+          // Update target time for the lerped ticker loop
+          targetTime = self.progress * duration
 
           // progress bar
           if (progressRef.current) {
@@ -189,6 +202,8 @@ const Hero = () => {
         },
       },
     })
+
+    gsap.ticker.add(renderLoop)
 
     // Subtle overlay colour shift across scroll
     gsap.to(overlayRef.current, {
@@ -223,6 +238,7 @@ const Hero = () => {
     return () => {
       scrubTl.kill()
       pinTrigger.kill()
+      gsap.ticker.remove(renderLoop)
       ScrollTrigger.getAll().forEach(t => t.kill())
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
